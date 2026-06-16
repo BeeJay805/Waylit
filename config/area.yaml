@@ -1,0 +1,84 @@
+# Waylit study area + verified open-data sources
+# Verified during Phase 0 on 2026-06-15. "verified" = endpoint hit live this session.
+
+city: "Boise, ID"
+footprint: "downtown + buffer"
+
+bbox:            # WGS84 (EPSG:4326)
+  min_lon: -116.220
+  min_lat: 43.600
+  max_lon: -116.185
+  max_lat: 43.630
+
+crs_storage: "EPSG:4326"
+crs_metric:  "EPSG:32611"   # UTM 11N, for distance + illuminance math
+
+arcgis_org_base: "https://services1.arcgis.com/WHM6qC35aMtyAAlN/arcgis/rest/services"
+
+sources:
+  streetlights:
+    service: "Boise_Streetlights_Open_Data/FeatureServer/0"
+    role: "PRIMARY lighting input (System A)"
+    license: "CC-BY-4.0 (City of Boise open data)"
+    verified: true
+    counts: { citywide: 13965, bbox_total: 3091, bbox_active_est: 2860 }
+    fields: [Pole_Owner, Fixture_Type, Lamp_Type, Wattage, Height,
+             Master_Arm_Length, Kelvins, Power_Feed, Fixture_Install_Date, Retired_Date]
+    completeness: "~98-100% on wattage/height/fixture/lamp across all owners (incl. Idaho Power)"
+
+  street_trees:
+    service: "BPR_Park_And_Street_Trees/FeatureServer"
+    role: "candidate structured canopy-occlusion input"
+    verified: false   # existence confirmed; schema NOT yet inspected
+    notes: "check for species, height, dripline/canopy radius"
+
+  buildings_3d:
+    service: "Boise_Buildings_3D/FeatureServer"
+    role: "candidate structured enclosure / sky-view-factor"
+    verified: false
+    notes: "footprint + height; also Buildings_3D_WSL1 (SceneServer)"
+
+  parcels:
+    service: "Ada_County_Parcels/FeatureServer"
+    role: "setback / frontage geometry"
+    verified: false
+
+  zoning:
+    service: "Boise_Zoning/FeatureServer"
+    role: "land-use / active-frontage context"
+    verified: false
+
+  crime_validation:
+    service: "BPD_Crimes_Public/FeatureServer"
+    role: "VALIDATION / CONTEXT ONLY - never a model input"
+    verified: false   # existence confirmed
+  calls_for_service:
+    service: "BPD_CallsForService/FeatureServer"
+    role: "VALIDATION / CONTEXT ONLY"
+    verified: false
+
+  transit_gtfs:
+    source: "Valley Regional Transit"
+    url: "https://www.transit.land/feeds/f-9rv2-valleyride"
+    license: "CC-BY-3.0"
+    role: "active transit at night (stops + service hours)"
+    verified: false   # feed existence confirmed via Transitland search
+
+  osm:
+    role: "walk graph + dense sidewalk geometry"
+    bbox_counts: { street_lamp_nodes: 115, lit_ways: 30,
+                   highway_ways: 2897, sidewalk_related_ways: 2899 }
+    verified: true
+
+  pois_businesses:
+    primary: "Foursquare OS Places (Apache-2.0, S3 parquet)"
+    secondary: "OSM POIs (opening_hours where present)"
+    role: "open-business density / frontage activity"
+    verified: false
+
+  imagery:
+    source: "Mapillary"
+    license: "CC-BY-SA"
+    role: "AI perception layer (B/C)"
+    status: "BLOCKED - awaiting access token; coverage gate pending"
+    verified: false
