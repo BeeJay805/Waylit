@@ -1,0 +1,6 @@
+# Waylit city config. Universal features (OSM + Overture) work anywhere; the streetlight
+# inventory is a Tier-1 lighting boost only where a city publishes one.
+name: "Boise, ID (downtown)"
+bbox: { min_lon: -116.220, min_lat: 43.600, max_lon: -116.185, max_lat: 43.630 }
+crs_metric: "EPSG:32611"   # UTM 11N
+streetlight_service: "https://services1.arcgis.com/WHM6qC35aMtyAAlN/arcgis/rest/services/Boise_Streetlights_Open_Data/FeatureServer/0"
