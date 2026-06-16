@@ -18,6 +18,7 @@ import math
 import pathlib
 import random
 import re
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -31,8 +32,14 @@ LOCATOR = PROC / "locator_base.png"
 LOG_FIELDS = ["ts_iso", "rater", "pair_id", "pair_type", "seg_left", "seg_right",
               "img_left", "img_right", "side_of_a", "choice", "winner_seg", "loser_seg"]
 IMG_RE = re.compile(r"^[0-9]+$")
+RATER_RE = re.compile(r"[^A-Za-z0-9 _-]")
 
-CFG = {"rater": "rater1", "bbox": None, "queue": [], "allowed_imgs": set()}
+
+def clean_rater(s):
+    return RATER_RE.sub("", (s or "").strip())[:30]
+
+
+CFG = {"rater": None, "bbox": None, "queue": [], "allowed_imgs": set()}
 
 
 def load_queue():
@@ -44,11 +51,12 @@ def load_queue():
     CFG["allowed_imgs"] = {r["img_a"] for r in rows} | {r["img_b"] for r in rows}
 
 
-def done_pairs():
+def done_pairs(rater=None):
     if not LOG.exists():
         return set()
     with LOG.open(encoding="utf-8") as f:
-        return {int(r["pair_id"]) for r in csv.DictReader(f) if r.get("pair_id")}
+        return {int(r["pair_id"]) for r in csv.DictReader(f)
+                if r.get("pair_id") and (rater is None or r.get("rater") == rater)}
 
 
 def append_choice(row):
@@ -91,8 +99,8 @@ def dot_pct(lon, lat):
     return (100 * (lon - mnx) / (mxx - mnx), 100 * (mxy - lat) / (mxy - mny))
 
 
-def next_pair():
-    done = done_pairs()
+def next_pair(rater):
+    done = done_pairs(rater)
     for r in CFG["queue"]:
         if r["pair_id"] not in done:
             return r, len(done)
@@ -170,6 +178,21 @@ b{{color:#7fd17f}}</style></head><body>
 <p>Next: run <code>python scripts/fit_pairwise_models.py</code> to calibrate weights and
 compare structured vs visual vs fusion.</p></body></html>"""
 
+NAME_GATE = """<!doctype html><html><head><meta charset="utf-8"><title>Waylit rating</title>
+<style>body{font-family:system-ui,Segoe UI,Arial;background:#0f1115;color:#e7e9ee;text-align:center;padding:56px 16px}
+input{font-size:16px;padding:10px;border-radius:8px;border:1px solid #2a2f3a;background:#171a21;color:#fff;width:240px}
+button{font-size:16px;padding:11px 22px;border-radius:8px;border:1px solid #3b6ea5;background:#222734;color:#fff;cursor:pointer;margin-left:8px}
+.box{max-width:560px;margin:0 auto}.muted{color:#9aa;font-size:14px;line-height:1.55}</style></head><body>
+<div class="box">
+<h2>Which streets feel safer to walk alone at night?</h2>
+<p class="muted">You will see two daytime photos at a time and pick the one that feels safer to walk
+alone at night, or mark them about the same. There are no right answers, go with your gut. Enter a
+name or initials so different raters stay separate (no account, nothing personal is stored).</p>
+<form method="POST" action="/start">
+ <input name="rater" placeholder="name or initials" autofocus maxlength="30" required>
+ <button type="submit">Start</button>
+</form></div></body></html>"""
+
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
@@ -202,18 +225,27 @@ class Handler(BaseHTTPRequestHandler):
             return self._send("missing", code=404)
         self._send(p.read_bytes(), "image/jpeg")
 
+    def _rater(self):
+        if CFG["rater"]:                # CLI --rater forces single-rater mode
+            return CFG["rater"]
+        c = SimpleCookie(self.headers.get("Cookie", ""))
+        return c["rater"].value if "rater" in c else None
+
     def _root(self):
-        pair, done = next_pair()
+        rater = self._rater()
+        if not rater:
+            return self._send(NAME_GATE)
         total = len(CFG["queue"])
+        pair, done = next_pair(rater)
         if pair is None:
-            tally = ""
+            import collections
+            c = collections.Counter()
             if LOG.exists():
-                import collections
-                c = collections.Counter()
                 with LOG.open(encoding="utf-8") as f:
                     for r in csv.DictReader(f):
-                        c[r["choice"]] += 1
-                tally = ", ".join(f"{k}={v}" for k, v in sorted(c.items()))
+                        if r.get("rater") == rater:
+                            c[r["choice"]] += 1
+            tally = ", ".join(f"{k}={v}" for k, v in sorted(c.items()))
             return self._send(DONE.format(total=total, tally=html.escape(tally)))
         # stable left/right assignment per pair
         a_left = random.Random(pair["pair_id"] * 2654435761 & 0xFFFFFFFF).random() < 0.5
@@ -232,26 +264,35 @@ class Handler(BaseHTTPRequestHandler):
         lx, ly = dot_pct(lon_l, lat_l)
         rx, ry = dot_pct(lon_r, lat_r)
         self._send(PAGE.format(
-            rater=html.escape(CFG["rater"]), done=done, total=total,
+            rater=html.escape(rater), done=done, total=total,
             pair_id=pair["pair_id"], pair_type=html.escape(pair["pair_type"]),
             seg_left=seg_l, seg_right=seg_r, img_left=img_l, img_right=img_r,
             side_of_a=side_of_a, lx=round(lx, 2), ly=round(ly, 2),
             rx=round(rx, 2), ry=round(ry, 2)))
 
     def do_POST(self):
-        if urlparse(self.path).path != "/choice":
-            return self._send("not found", code=404)
+        path = urlparse(self.path).path
         n = int(self.headers.get("Content-Length", 0))
         form = {k: v[0] for k, v in parse_qs(self.rfile.read(n).decode("utf-8")).items()}
+        if path == "/start":           # multi-rater: set the rater cookie, then rate
+            name = clean_rater(form.get("rater", "")) or "anon"
+            self.send_response(303)
+            self.send_header("Set-Cookie", f"rater={name}; Path=/; Max-Age=2592000; SameSite=Lax")
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+        if path != "/choice":
+            return self._send("not found", code=404)
+        rater = self._rater() or "anon"
         pid = int(form.get("pair_id", -1))
-        if pid not in done_pairs():  # idempotent: ignore double-submit of same pair
+        if pid not in done_pairs(rater):  # idempotent per rater
             choice = form.get("choice", "skip")
             sl, sr = form.get("seg_left", ""), form.get("seg_right", "")
             winner = sl if choice == "L" else sr if choice == "R" else ""
             loser = sr if choice == "L" else sl if choice == "R" else ""
             append_choice({
                 "ts_iso": dt.datetime.now().isoformat(timespec="seconds"),
-                "rater": CFG["rater"], "pair_id": pid,
+                "rater": rater, "pair_id": pid,
                 "pair_type": form.get("pair_type", ""),
                 "seg_left": sl, "seg_right": sr,
                 "img_left": form.get("img_left", ""), "img_right": form.get("img_right", ""),
@@ -266,16 +307,23 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8000)
-    ap.add_argument("--rater", default="rater1")
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="127.0.0.1 = local only; 0.0.0.0 lets others on your network rate")
+    ap.add_argument("--rater", default=None,
+                    help="force one rater id; omit for multi-rater (browser asks each person)")
     args = ap.parse_args()
     CFG["rater"] = args.rater
     load_queue()
     read_bbox()
     ensure_locator()
-    _, done = next_pair()
-    srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"Waylit blind rating | rater={args.rater} | {done}/{len(CFG['queue'])} done")
-    print(f"open  http://127.0.0.1:{args.port}   (Ctrl+C to stop; progress is saved)")
+    mode = f"single rater={args.rater}" if args.rater else "multi-rater (browser name gate)"
+    srv = ThreadingHTTPServer((args.host, args.port), Handler)
+    view = "127.0.0.1" if args.host == "0.0.0.0" else args.host
+    print(f"Waylit blind rating | {mode} | {len(CFG['queue'])} pairs")
+    print(f"open  http://{view}:{args.port}   (Ctrl+C to stop; progress is saved)")
+    if args.host != "127.0.0.1":
+        print("WARNING: bound to a public interface with no auth. Only share on a trusted network "
+              "or a temporary tunnel, and stop it when done.")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

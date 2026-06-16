@@ -75,6 +75,38 @@ def load_pairs():
     return pairs, counts
 
 
+def rater_report():
+    """Per-rater decisive counts + inter-rater agreement on pairs rated by 2+ people.
+    Chance for a binary winner is 0.5, so a kappa-style score rescales agreement above that."""
+    import collections
+    if not LOG.exists():
+        return {}
+    by_rater = collections.Counter()
+    votes = collections.defaultdict(dict)   # pair_id -> {rater: winner_seg}
+    with LOG.open(encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            if r.get("choice") in ("L", "R") and r.get("winner_seg") and r.get("loser_seg"):
+                rt = r.get("rater", "?")
+                by_rater[rt] += 1
+                votes[int(r["pair_id"])][rt] = int(r["winner_seg"])
+    agree = tot = shared = 0
+    for v in votes.values():
+        items = list(v.values())
+        if len(items) >= 2:
+            shared += 1
+            for i in range(len(items)):
+                for j in range(i + 1, len(items)):
+                    tot += 1
+                    agree += int(items[i] == items[j])
+    out = {"raters": dict(by_rater), "n_raters": len(by_rater),
+           "pairs_rated_by_2plus": shared}
+    if tot:
+        pa = agree / tot
+        out["inter_rater_agreement"] = round(pa, 3)
+        out["inter_rater_kappa_vs_chance"] = round((pa - 0.5) / 0.5, 3)
+    return out
+
+
 def diffs(pairs, Z, feats):
     """Per-pair signed difference d = z(winner) - z(loser), oriented so the human pick is +."""
     W = Z.loc[[w for w, _ in pairs], feats].to_numpy()
@@ -184,6 +216,7 @@ def main():
             return
 
     raw = pd.read_parquet(PROC / "segment_features.parquet").set_index("seg_id")
+    rr = {} if args.smoke else rater_report()
 
     # final calibrated weights = full-data fit (A = the routing comfort weights; C reported too)
     weights = {}
@@ -264,9 +297,17 @@ def main():
         "spatial_cv_sensitivity": sweep,
         "baselines": base,
         "paired_diff_vs_structured": {"at_blocks": K, "held_out": held, **diff},
+        "rater_diagnostics": rr,
         "verdict": verdict, "caveats": caveats}, indent=2))
 
     print(f"\ndecisive pairs: {len(pairs)}")
+    if rr.get("n_raters"):
+        print(f"raters: {rr['raters']}")
+        if "inter_rater_agreement" in rr:
+            print(f"inter-rater agreement on {rr['pairs_rated_by_2plus']} shared pairs: "
+                  f"{rr['inter_rater_agreement']} (kappa-vs-chance {rr['inter_rater_kappa_vs_chance']})")
+        elif rr["n_raters"] == 1:
+            print("inter-rater agreement: needs >=2 raters (only 1 so far)")
     print("robust single-feature agreement (all pairs, no fitting):")
     for f, d in sfa.items():
         print(f"  pick higher {f:20s} {d['agreement']:.0%}  (n={d['n_differ']})")
