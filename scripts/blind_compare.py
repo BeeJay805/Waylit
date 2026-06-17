@@ -29,6 +29,16 @@ IMGDIR = ROOT / "data" / "raw" / "mapillary" / "img"
 QUEUE = GT / "pairwise_queue.csv"
 LOG = GT / "pairwise.csv"
 LOCATOR = PROC / "locator_base.png"
+CITY_CFG = {
+    "boise": {"queue": GT / "pairwise_queue.csv", "log": GT / "pairwise.csv",
+              "imgdir": ROOT / "data" / "raw" / "mapillary" / "img",
+              "locator": PROC / "locator_base.png", "bbox_yaml": ROOT / "config" / "area.yaml",
+              "gpkg": PROC / "segment_features.gpkg"},
+    "la": {"queue": GT / "la_pairwise_queue.csv", "log": GT / "la_pairwise.csv",
+           "imgdir": ROOT / "data" / "raw" / "mapillary_la" / "img",
+           "locator": PROC / "la_locator_base.png",
+           "bbox_yaml": ROOT / "config" / "cities" / "la.yaml", "gpkg": None},
+}
 LOG_FIELDS = ["ts_iso", "rater", "pair_id", "pair_type", "seg_left", "seg_right",
               "img_left", "img_right", "side_of_a", "choice", "winner_seg", "loser_seg"]
 IMG_RE = re.compile(r"^[0-9]+$")
@@ -68,21 +78,24 @@ def append_choice(row):
         w.writerow(row)
 
 
-def read_bbox():
+def read_bbox(yaml_path):
     import yaml
-    b = yaml.safe_load((ROOT / "config" / "area.yaml").read_text())["bbox"]
+    b = yaml.safe_load(yaml_path.read_text())["bbox"]
     CFG["bbox"] = (b["min_lon"], b["min_lat"], b["max_lon"], b["max_lat"])
 
 
 def ensure_locator():
     if LOCATOR.exists():
         return
+    if not CFG.get("gpkg"):
+        raise SystemExit(f"locator {LOCATOR.name} missing; build the city set first "
+                         "(e.g. python scripts/fetch_la_rating.py)")
     import geopandas as gpd
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     mnx, mny, mxx, mxy = CFG["bbox"]
-    g = gpd.read_file(PROC / "segment_features.gpkg").to_crs("EPSG:4326")
+    g = gpd.read_file(CFG["gpkg"]).to_crs("EPSG:4326")
     mean_lat = math.radians((mny + mxy) / 2)
     w = 540
     h = int(w * (mxy - mny) / ((mxx - mnx) * math.cos(mean_lat)))
@@ -311,15 +324,21 @@ def main():
                     help="127.0.0.1 = local only; 0.0.0.0 lets others on your network rate")
     ap.add_argument("--rater", default=None,
                     help="force one rater id; omit for multi-rater (browser asks each person)")
+    ap.add_argument("--city", default="boise", choices=list(CITY_CFG),
+                    help="which city's rating set to serve")
     args = ap.parse_args()
+    global QUEUE, LOG, IMGDIR, LOCATOR
+    cc = CITY_CFG[args.city]
+    QUEUE, LOG, IMGDIR, LOCATOR = cc["queue"], cc["log"], cc["imgdir"], cc["locator"]
+    CFG["gpkg"] = cc["gpkg"]
     CFG["rater"] = args.rater
     load_queue()
-    read_bbox()
+    read_bbox(cc["bbox_yaml"])
     ensure_locator()
     mode = f"single rater={args.rater}" if args.rater else "multi-rater (browser name gate)"
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     view = "127.0.0.1" if args.host == "0.0.0.0" else args.host
-    print(f"Waylit blind rating | {mode} | {len(CFG['queue'])} pairs")
+    print(f"Waylit blind rating [{args.city}] | {mode} | {len(CFG['queue'])} pairs")
     print(f"open  http://{view}:{args.port}   (Ctrl+C to stop; progress is saved)")
     if args.host != "127.0.0.1":
         print("WARNING: bound to a public interface with no auth. Only share on a trusted network "
@@ -327,7 +346,7 @@ def main():
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
-        print("\nstopped. progress saved to data/ground_truth/pairwise.csv")
+        print("\nstopped. progress saved to", LOG)
 
 
 if __name__ == "__main__":
