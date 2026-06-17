@@ -29,15 +29,29 @@ IMGDIR = ROOT / "data" / "raw" / "mapillary" / "img"
 QUEUE = GT / "pairwise_queue.csv"
 LOG = GT / "pairwise.csv"
 LOCATOR = PROC / "locator_base.png"
+# photos/locator/bbox are per-CITY; queue+log are per (mode, city); the question is per-MODE
 CITY_CFG = {
-    "boise": {"queue": GT / "pairwise_queue.csv", "log": GT / "pairwise.csv",
-              "imgdir": ROOT / "data" / "raw" / "mapillary" / "img",
+    "boise": {"prefix": "", "imgdir": ROOT / "data" / "raw" / "mapillary" / "img",
               "locator": PROC / "locator_base.png", "bbox_yaml": ROOT / "config" / "area.yaml",
               "gpkg": PROC / "segment_features.gpkg"},
-    "la": {"queue": GT / "la_pairwise_queue.csv", "log": GT / "la_pairwise.csv",
-           "imgdir": ROOT / "data" / "raw" / "mapillary_la" / "img",
+    "la": {"prefix": "la_", "imgdir": ROOT / "data" / "raw" / "mapillary_la" / "img",
            "locator": PROC / "la_locator_base.png",
            "bbox_yaml": ROOT / "config" / "cities" / "la.yaml", "gpkg": None},
+}
+MODE_CFG = {
+    "night": {
+        "q": "Which street feels safer to walk alone at night?",
+        "note": "No scores or map data are shown. Judge from the photo and rough location only. "
+                "Daytime photos are a stand-in for the night question - read the street, not the daylight.",
+        "intro": "You will see two daytime photos at a time and pick the one that feels safer to "
+                 "walk alone at night, or mark them about the same. No right answers, go with your gut."},
+    "day": {
+        "q": "Which street feels safer to walk during the day?",
+        "note": "No scores are shown. Judge from the photo: sidewalks, traffic, how exposed to cars, "
+                "how walkable. Read the street.",
+        "intro": "You will see two daytime photos at a time and pick the one that feels safer and "
+                 "better to walk during the day (sidewalks, traffic, crossings), or mark them about "
+                 "the same. No right answers, go with your gut."},
 }
 LOG_FIELDS = ["ts_iso", "rater", "pair_id", "pair_type", "seg_left", "seg_right",
               "img_left", "img_right", "side_of_a", "choice", "winner_seg", "loser_seg"]
@@ -49,7 +63,8 @@ def clean_rater(s):
     return RATER_RE.sub("", (s or "").strip())[:30]
 
 
-CFG = {"rater": None, "bbox": None, "queue": [], "allowed_imgs": set()}
+CFG = {"rater": None, "bbox": None, "queue": [], "allowed_imgs": set(),
+       "question": "", "note": "", "intro": ""}
 
 
 def load_queue():
@@ -145,7 +160,7 @@ button:hover{{background:#2c3342}}.b-l{{border-color:#3b6ea5}}.b-r{{border-color
 &nbsp;|&nbsp; progress <b>{done}</b> / {total}
 &nbsp;|&nbsp; <span class="kbd">keys: F = left &nbsp; J = right &nbsp; T = same &nbsp; S = skip</span></div>
 <div class="wrap">
-<div class="q">Which street feels safer to walk alone at night?</div>
+<div class="q">{question}</div>
 <div class="pair">
  <div class="card"><img src="/img/{img_left}" alt="left"><div class="tag">LEFT (F)</div></div>
  <div class="card"><img src="/img/{img_right}" alt="right"><div class="tag">RIGHT (J)</div></div>
@@ -172,8 +187,7 @@ button:hover{{background:#2c3342}}.b-l{{border-color:#3b6ea5}}.b-r{{border-color
 </div>
 <div class="legend"><span style="color:#4b8fd6">&#9679;</span> left photo &nbsp;&nbsp;
  <span style="color:#e0903f">&#9679;</span> right photo &nbsp; (rough downtown location)</div>
-<div class="note">No safety scores or map data are shown. Judge from the photo and rough location only.
- Daytime photos are a stand-in for the night question - read the street, not the daylight.</div>
+<div class="note">{note}</div>
 </div>
 <script>
 document.addEventListener('keydown',function(e){{
@@ -197,10 +211,9 @@ input{font-size:16px;padding:10px;border-radius:8px;border:1px solid #2a2f3a;bac
 button{font-size:16px;padding:11px 22px;border-radius:8px;border:1px solid #3b6ea5;background:#222734;color:#fff;cursor:pointer;margin-left:8px}
 .box{max-width:560px;margin:0 auto}.muted{color:#9aa;font-size:14px;line-height:1.55}</style></head><body>
 <div class="box">
-<h2>Which streets feel safer to walk alone at night?</h2>
-<p class="muted">You will see two daytime photos at a time and pick the one that feels safer to walk
-alone at night, or mark them about the same. There are no right answers, go with your gut. Enter a
-name or initials so different raters stay separate (no account, nothing personal is stored).</p>
+<h2>%%QUESTION%%</h2>
+<p class="muted">%%INTRO%% Enter a name or initials so different raters stay separate (no account,
+nothing personal is stored).</p>
 <form method="POST" action="/start">
  <input name="rater" placeholder="name or initials" autofocus maxlength="30" required>
  <button type="submit">Start</button>
@@ -247,7 +260,8 @@ class Handler(BaseHTTPRequestHandler):
     def _root(self):
         rater = self._rater()
         if not rater:
-            return self._send(NAME_GATE)
+            return self._send(NAME_GATE.replace("%%QUESTION%%", html.escape(CFG["question"]))
+                                       .replace("%%INTRO%%", html.escape(CFG["intro"])))
         total = len(CFG["queue"])
         pair, done = next_pair(rater)
         if pair is None:
@@ -278,6 +292,7 @@ class Handler(BaseHTTPRequestHandler):
         rx, ry = dot_pct(lon_r, lat_r)
         self._send(PAGE.format(
             rater=html.escape(rater), done=done, total=total,
+            question=html.escape(CFG["question"]), note=html.escape(CFG["note"]),
             pair_id=pair["pair_id"], pair_type=html.escape(pair["pair_type"]),
             seg_left=seg_l, seg_right=seg_r, img_left=img_l, img_right=img_r,
             side_of_a=side_of_a, lx=round(lx, 2), ly=round(ly, 2),
@@ -325,20 +340,26 @@ def main():
     ap.add_argument("--rater", default=None,
                     help="force one rater id; omit for multi-rater (browser asks each person)")
     ap.add_argument("--city", default="boise", choices=list(CITY_CFG),
-                    help="which city's rating set to serve")
+                    help="which city's photos/locator to serve")
+    ap.add_argument("--mode", default="night", choices=list(MODE_CFG),
+                    help="night = comfort/lighting question; day = traffic/sidewalk safety question")
     args = ap.parse_args()
     global QUEUE, LOG, IMGDIR, LOCATOR
     cc = CITY_CFG[args.city]
-    QUEUE, LOG, IMGDIR, LOCATOR = cc["queue"], cc["log"], cc["imgdir"], cc["locator"]
+    mp = "day_" if args.mode == "day" else ""
+    QUEUE = GT / f"{mp}{cc['prefix']}pairwise_queue.csv"
+    LOG = GT / f"{mp}{cc['prefix']}pairwise.csv"
+    IMGDIR, LOCATOR = cc["imgdir"], cc["locator"]
     CFG["gpkg"] = cc["gpkg"]
     CFG["rater"] = args.rater
+    CFG["question"], CFG["note"], CFG["intro"] = (MODE_CFG[args.mode][k] for k in ("q", "note", "intro"))
     load_queue()
     read_bbox(cc["bbox_yaml"])
     ensure_locator()
-    mode = f"single rater={args.rater}" if args.rater else "multi-rater (browser name gate)"
+    rmode = f"single rater={args.rater}" if args.rater else "multi-rater (browser name gate)"
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     view = "127.0.0.1" if args.host == "0.0.0.0" else args.host
-    print(f"Waylit blind rating [{args.city}] | {mode} | {len(CFG['queue'])} pairs")
+    print(f"Waylit blind rating [{args.city}/{args.mode}] | {rmode} | {len(CFG['queue'])} pairs")
     print(f"open  http://{view}:{args.port}   (Ctrl+C to stop; progress is saved)")
     if args.host != "127.0.0.1":
         print("WARNING: bound to a public interface with no auth. Only share on a trusted network "
