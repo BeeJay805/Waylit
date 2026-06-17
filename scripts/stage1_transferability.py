@@ -183,6 +183,12 @@ def model_artifact(pairs, primary, summary):
         "ood": {"metric": "sqrt(mean(z^2)) of area features vs training_raw_stats (log1p scale)",
                 "cutoff_p95": round(float(np.quantile(dist, 0.95)), 4),
                 "note": "segments beyond cutoff are unlike the dense-US-downtown training set -> low confidence"},
+        "area_reference": {
+            "night_activity_share": round(float((R.poi_night_density > 0).mean()), 4),
+            "context_share": round(float((R.poi_density > 0).mean()), 4),
+            "note": "share of training segments with night-business / any-business nearby. An area whose "
+                    "night-activity share is far below this lacks the dense core the model was trained on "
+                    "(e.g. a low-density suburb) -> low area confidence even if individual streets look normal."},
         "training_cities": list(FEATS), "n_train_segments": int(len(R)),
         "validation": {"mean_held_out": summary["mean_held_out"],
                        "pair_weighted_held_out": summary["pair_weighted_held_out"],
