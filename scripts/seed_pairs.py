@@ -13,6 +13,8 @@ are never shown by the rating tool. Deterministic (fixed seed).
 
 Output: data/ground_truth/pairwise_queue.csv
 """
+import argparse
+import csv
 import pathlib
 
 import numpy as np
@@ -28,6 +30,12 @@ GRID = 4         # spatial cells per axis, for spread reporting
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--seed", type=int, default=SEED)
+    ap.add_argument("--out", default="pairwise_queue.csv")
+    ap.add_argument("--exclude", default="", help="queue CSV whose seg-pairs to avoid (disjoint batch)")
+    args = ap.parse_args()
+    seed = args.seed
     df = pd.read_parquet(PROC / "segment_features.parquet")
     link = pd.read_parquet(PROC / "segment_image_link.parquet")[["seg_id", "img_best"]]
     d = df[df.has_visual].merge(link, on="seg_id", how="inner").reset_index(drop=True)
@@ -46,7 +54,7 @@ def main():
         d[col] = np.clip(np.digitize(v, edges[1:-1]), 0, GRID - 1)
     d["cell"] = d["cx"] * GRID + d["cy"]
 
-    rng = np.random.default_rng(SEED)
+    rng = np.random.default_rng(seed)
     seg = d["seg_id"].to_numpy()
     zl, zp = d["zl"].to_numpy(), d["zp"].to_numpy()
     n = len(d)
@@ -68,6 +76,11 @@ def main():
     counts = {k: 0 for k in N_TARGET}
     appear = np.zeros(n, dtype=int)
     used = set()
+    if args.exclude:                       # avoid seg-pairs already in another queue (disjoint batch)
+        for r in csv.DictReader((GT / args.exclude).open(encoding="utf-8")):
+            a, b = int(r["seg_a"]), int(r["seg_b"])
+            used.add((min(a, b), max(a, b)))
+        print(f"excluding {len(used)} existing pairs from {args.exclude}")
     pairs = []
     attempts = 0
     while sum(counts.values()) < sum(N_TARGET.values()) and attempts < 400000:
@@ -101,11 +114,11 @@ def main():
 
     q = pd.DataFrame(pairs)
     # deterministic shuffle so the session is well mixed, then renumber
-    q = q.sample(frac=1.0, random_state=SEED).reset_index(drop=True)
+    q = q.sample(frac=1.0, random_state=seed).reset_index(drop=True)
     q["pair_id"] = np.arange(len(q))
 
     GT.mkdir(parents=True, exist_ok=True)
-    q.to_csv(GT / "pairwise_queue.csv", index=False)
+    q.to_csv(GT / args.out, index=False)
 
     segs_used = pd.unique(q[["seg_a", "seg_b"]].to_numpy().ravel())
     cells = pd.unique(q[["cell_a", "cell_b"]].to_numpy().ravel())
@@ -113,7 +126,7 @@ def main():
     print(f"distinct segments used: {len(segs_used)} / {n} | max appearances: {appear.max()}")
     print(f"spatial cells touched: {len(cells)} / {GRID * GRID} | "
           f"dist thresholds p50={p50:.2f} p80={p80:.2f}")
-    print("saved data/ground_truth/pairwise_queue.csv")
+    print(f"saved data/ground_truth/{args.out}")
 
 
 if __name__ == "__main__":

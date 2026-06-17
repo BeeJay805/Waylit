@@ -1,0 +1,6 @@
+# 4th city / portability expansion. National sources only, no local streetlight inventory
+# configured (lighting falls to the Tier-3 imagery path, not run here) - same as SLC.
+name: "Denver, CO (downtown / LoDo / Capitol Hill)"
+bbox: { min_lon: -105.005, min_lat: 39.740, max_lon: -104.975, max_lat: 39.762 }
+crs_metric: "EPSG:32613"   # UTM 13N
+streetlight_service: null

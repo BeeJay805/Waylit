@@ -102,8 +102,10 @@ def main(city):
         dens.append(len(idx))
         ndens.append(int(nightarr[idx].sum()) if len(idx) else 0)
 
+    cent = Em.geometry.centroid.to_crs("EPSG:4326")   # segment coords (aligned to seg_id) for imagery
     df = pd.DataFrame({"seg_id": np.arange(len(Em)), "encl_frontage": front.round(3),
-                       "encl_height": np.round(mh, 1), "poi_density": dens, "poi_night_density": ndens})
+                       "encl_height": np.round(mh, 1), "poi_density": dens, "poi_night_density": ndens,
+                       "lon": cent.x.values.round(6), "lat": cent.y.values.round(6)})
     out = ROOT / "data" / "processed" / f"{city}_features.parquet"
     df.to_parquet(out)
     print(f"median enclosure frontage {np.median(front):.2f} | median POI density {int(np.median(dens))} | "
