@@ -1,0 +1,32 @@
+# Data files: keep the folder's README, ignore the actual data
+data/*
+!data/README.md
+*.gpkg
+*.parquet
+*.geojson
+*.zip
+*.tif
+
+# Secrets / tokens: NEVER commit
+.env
+*.token
+secrets/
+mapillary_token*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+env/
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Local agent tooling / runtime state (not part of the project)
+.claude-flow/
+.remember/
+.swarm/
+.hive-mind/

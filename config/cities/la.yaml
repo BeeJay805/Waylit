@@ -1,0 +1,16 @@
+# High-variance VALIDATION city. Same comfort features as Boise; crime + demographics are
+# HELD-OUT targets, never features. Central/South LA transect spanning Downtown, Westlake/
+# Koreatown, Pico-Union and northern South LA (gentrified, dense-immigrant, and lower-income
+# blocks together) so both the crime test and the bias audit have real variance.
+name: "Los Angeles, CA (Central/South transect)"
+bbox: { min_lon: -118.300, min_lat: 34.005, max_lon: -118.240, max_lat: 34.065 }
+crs_metric: "EPSG:32611"   # UTM 11N
+
+# LA Bureau of Street Lighting (MapServer; ~18.7k lamps in bbox). NO wattage/height fields,
+# so lighting is a lamp-COVERAGE proxy (lit-frontage fraction), not the Boise photometric score.
+streetlight_service: "https://maps.lacity.org/lahub/rest/services/Bureau_of_Street_Lighting/MapServer/0"
+streetlight_photometric: false
+
+# Validation targets (NOT features)
+crime_socrata: "https://data.lacity.org/resource/2nrs-mtv8.json"   # LAPD 2020-present
+census: { year: 2022, state: "06", county: "037" }                  # ACS 5-yr, LA County

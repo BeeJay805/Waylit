@@ -1,0 +1,5 @@
+# Portability test city: national sources only, no local streetlight inventory configured.
+name: "Salt Lake City, UT (downtown)"
+bbox: { min_lon: -111.905, min_lat: 40.755, max_lon: -111.875, max_lat: 40.775 }
+crs_metric: "EPSG:32612"   # UTM 12N
+streetlight_service: null

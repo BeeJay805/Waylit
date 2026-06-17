@@ -1,0 +1,6 @@
+# 6th city / Midwest downtown grid. National sources only; no local streetlight inventory
+# configured (lighting -> Tier-3 imagery path, not run here).
+name: "Minneapolis, MN (downtown)"
+bbox: { min_lon: -93.285, min_lat: 44.970, max_lon: -93.255, max_lat: 44.990 }
+crs_metric: "EPSG:32615"   # UTM 15N
+streetlight_service: null

@@ -1,0 +1,6 @@
+# 5th city / East Coast dense walkable downtown (Penn Quarter / Chinatown / Downtown).
+# National sources only; no local streetlight inventory configured (lighting -> Tier-3, not run).
+name: "Washington, DC (downtown / Penn Quarter)"
+bbox: { min_lon: -77.035, min_lat: 38.892, max_lon: -77.010, max_lat: 38.908 }
+crs_metric: "EPSG:32618"   # UTM 18N
+streetlight_service: null

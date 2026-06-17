@@ -1,0 +1,15 @@
+# Core + pipeline (installed and in use):
+requests>=2.31
+PyYAML>=6.0
+osmnx>=2.1
+geopandas>=1.1
+networkx>=3.0
+shapely>=2.0
+scipy>=1.11
+scikit-learn>=1.4
+matplotlib>=3.8
+
+# AI perception layer (B1/B2/C): added during the CV smoke test
+torch
+transformers
+pillow
