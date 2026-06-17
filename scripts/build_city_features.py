@@ -66,23 +66,22 @@ def enclosure(Em, bld):
     return np.array(front), np.array(mh)
 
 
-def main(city):
-    cfg = yaml.safe_load((ROOT / "config" / "cities" / f"{city}.yaml").read_text())
-    B, METRIC = cfg["bbox"], cfg["crs_metric"]
+def build_features(bbox, metric, tag):
+    """Build the 4 universal features for an arbitrary bbox. tag keys the Overture cache.
+    Returns (df with seg_id + 4 features + lon/lat, info dict). Identical recipe for the
+    training cities (via main) and the on-demand engine (comfort_engine.py)."""
+    B = bbox
     bbox_str = f'{B["min_lon"]},{B["min_lat"]},{B["max_lon"]},{B["max_lat"]}'
-    print(f"=== {cfg['name']} === metric={METRIC}")
 
     G = ox.convert.to_undirected(ox.graph_from_polygon(
         box(B["min_lon"], B["min_lat"], B["max_lon"], B["max_lat"]), network_type="walk", retain_all=True))
     E = ox.graph_to_gdfs(G, nodes=False).reset_index()
     E["highway"] = E["highway"].apply(coerce)
     E = E[E["highway"].isin(WALKABLE) & (E["length"] >= 25)].reset_index(drop=True)
-    Em = E.to_crs(METRIC)
-    print(f"walk segments: {len(Em)}")
+    Em = E.to_crs(metric)
 
-    bld = overture(city, "building", bbox_str, METRIC)
-    pl = overture(city, "place", bbox_str, METRIC)
-    print(f"Overture: {len(bld)} buildings ({bld['height'].notna().mean():.0%} with height), {len(pl)} places")
+    bld = overture(tag, "building", bbox_str, metric)
+    pl = overture(tag, "place", bbox_str, metric)
 
     front, mh = enclosure(Em, bld)
     def primary(c):
@@ -106,10 +105,23 @@ def main(city):
     df = pd.DataFrame({"seg_id": np.arange(len(Em)), "encl_frontage": front.round(3),
                        "encl_height": np.round(mh, 1), "poi_density": dens, "poi_night_density": ndens,
                        "lon": cent.x.values.round(6), "lat": cent.y.values.round(6)})
+    info = {"walk_segments": len(Em), "buildings": len(bld),
+            "buildings_with_height": float(bld["height"].notna().mean()), "places": len(pl)}
+    return df, info
+
+
+def main(city):
+    cfg = yaml.safe_load((ROOT / "config" / "cities" / f"{city}.yaml").read_text())
+    METRIC = cfg["crs_metric"]
+    print(f"=== {cfg['name']} === metric={METRIC}")
+    df, info = build_features(cfg["bbox"], METRIC, city)
+    print(f"walk segments: {info['walk_segments']}")
+    print(f"Overture: {info['buildings']} buildings ({info['buildings_with_height']:.0%} with height), "
+          f"{info['places']} places")
     out = ROOT / "data" / "processed" / f"{city}_features.parquet"
     df.to_parquet(out)
-    print(f"median enclosure frontage {np.median(front):.2f} | median POI density {int(np.median(dens))} | "
-          f"median night POIs {int(np.median(ndens))}")
+    print(f"median enclosure frontage {df.encl_frontage.median():.2f} | median POI density "
+          f"{int(df.poi_density.median())} | median night POIs {int(df.poi_night_density.median())}")
     print(f"lighting: {'Tier-1 inventory available' if cfg.get('streetlight_service') else 'no local inventory (Tier-3 imagery path, not run here)'}")
     print(f"saved {out}")
 
